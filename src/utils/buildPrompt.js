@@ -1,0 +1,111 @@
+/**
+ * 构建塔罗解读 prompt——极简版。
+ * 核心原则：少废话，直击要害。不要堆砌，不要鸡汤。
+ */
+
+const ELEMENT_ZH = { wands: "火·权杖", cups: "水·圣杯", swords: "风·宝剑", pentacles: "土·星币" };
+
+const ARCANA_NOTE = {
+  allMajor: "全大牌→灵魂层面的重大转折，非日常琐事。",
+  mostlyMajor: "大牌过半→深层人生转变。",
+  balanced: "大小牌均衡→有方向也有具体情境。",
+  mostlyMinor: "小牌为主→聚焦日常具体课题。",
+  allMinor: "全小牌→务实的日常探索。",
+};
+
+function arcanaNote(major, total) {
+  if (major === total) return ARCANA_NOTE.allMajor;
+  if (major >= total * 0.5) return ARCANA_NOTE.mostlyMajor;
+  if (major >= 2) return ARCANA_NOTE.balanced;
+  if (major >= 1) return ARCANA_NOTE.mostlyMinor;
+  return ARCANA_NOTE.allMinor;
+}
+
+function reversedNote(up, rev) {
+  if (rev === 0) return "全正位→能量向外，聚焦外部事件。";
+  if (rev === up + rev) return "全逆位→深度内在功课，能量在内部酝酿。";
+  if (rev >= (up + rev) * 0.5) return "逆位较多→内在转化是主旋律。";
+  return "";
+}
+
+function posGuide(id, name) {
+  const s = (id + name).toLowerCase();
+  if (/past|过去|根源/.test(s)) return "【过去/根源】重在：这件事留下了什么印记？求问者获得了什么经验？";
+  if (/present|现在|现状|当前|核心|center/.test(s)) return "【现在/核心】重在：当前能量的核心状态。求问者最需要关注什么？";
+  if (/future|未来|走向|发展|结果|outcome/.test(s)) return "【未来/结果】重在：按当前轨迹的自然趋势。不是预言，是可影响的方向。";
+  if (/阻碍|obstacle|challenge|挑战/.test(s)) return "【阻碍】重在：障碍往往不是外部敌人，是内在的恐惧或盲点。温和指出。";
+  if (/建议|advice|指引|行动/.test(s)) return "【建议/行动】重在：具体、可执行的行动方向。不要空话。";
+  if (/环境|environment|周围/.test(s)) return "【环境】重在：外部因素在支持还是阻碍？求问者可能忽略了什么资源？";
+  if (/希望|hope|恐惧|fear/.test(s)) return "【希望与恐惧】重在：期待和担忧往往一体两面。哪些期待是真的？哪些恐惧是多余的？";
+  if (/自我|self|你/.test(s)) return "【自我】重在：求问者在这个处境中的真实状态——可能和ta以为的不一样。";
+  return "结合该位置的含义，将牌义映射到求问者的人生领域。";
+}
+
+export function buildPrompt(question, spread, placements, deckMeta) {
+  const placed = spread.positions.map((p) => placements[p.id]).filter(Boolean);
+  const majorCount = placed.filter((c) => c.arcana === "major").length;
+  const upCount = placed.filter((c) => !c.isReversed).length;
+  const revCount = placed.length - upCount;
+
+  const suits = {};
+  placed.forEach((c) => { if (c.suit) suits[c.suit] = (suits[c.suit] || 0) + 1; });
+  const topSuit = Object.entries(suits).sort((a, b) => b[1] - a[1])[0];
+
+  const nums = {};
+  placed.forEach((c) => { if (c.number !== undefined) nums[c.number] = (nums[c.number] || 0) + 1; });
+  const repeatNums = Object.entries(nums).filter(([, c]) => c >= 2).map(([n, c]) => `数字${n}×${c}`);
+
+  const cardsBlock = spread.positions.map((pos, i) => {
+    const card = placements[pos.id];
+    if (!card) return null;
+    const ori = card.isReversed ? "逆位" : "正位";
+    const meaning = (card.isReversed ? card.reversedMeaning : card.uprightMeaning) || "";
+    const syms = (card.symbols || []).map((s) => `${s.symbol}:${s.meaning}`).join("；");
+    const arcanaLabel = card.arcana === "major" ? "大牌" : `小牌·${ELEMENT_ZH[card.suit] || ""}`;
+    return `## ${pos.name}（${pos.description}）
+${card.nameZh} / ${card.nameEn} / ${arcanaLabel} / ${ori}${card.number !== undefined ? ` / 数字${card.number}` : ""}
+画面：${card.imagery || "无"}
+符号：${syms || "无"}
+牌义：${meaning}
+位置指引：${posGuide(pos.id, pos.name)}`;
+  }).filter(Boolean).join("\n\n");
+
+  const qLine = question ? `\n问题："${question}"。紧扣此问题解读，不要偏离。` : "";
+
+  return `你是塔罗解读师。以下是一次占卜的完整信息。请给出直接、有洞察力的解读。
+
+# 牌阵
+${spread.name}（${spread.description}）| ${deckMeta.name} | ${placed.length}张牌
+大牌${majorCount}张/小牌${placed.length - majorCount}张 | 正位${upCount}/逆位${revCount}
+${topSuit ? `主导花色：${ELEMENT_ZH[topSuit[0]]}×${topSuit[1]}` : ""}
+${repeatNums.length > 0 ? `重复数字：${repeatNums.join(" ")}` : ""}
+${arcanaNote(majorCount, placed.length)}
+${revCount > 0 ? reversedNote(upCount, revCount) : ""}
+${qLine}
+
+# 牌面数据
+
+${cardsBlock}
+
+---
+
+# 解读要求
+
+**总字数**：500-800字。
+
+**结构**（三段自然过渡，不用标题）：
+
+第一段（3-4句）——能量速写。从牌面的宏观特征（大牌/小牌比例、花色主导、正逆位分布）给出整体判断。第一句就进入正题。
+
+第二段——挑和问题最相关的牌展开。每张牌必须引用画面中的具体意象来支撑判断——说"你正处在迷茫中"不如说"圣杯四那个盘坐在树下不看眼前杯子的人，就是你现在的样子"。牌与牌之间有呼应的自然带出来。
+
+第三段——基于牌面信息，给出求问者现在就能做的 1-2 件事。
+
+**必须做到**：
+- 每提到一张牌，先描述画面中你看到的具体细节（人物在做什么、什么表情、什么颜色、什么动作），再把这些细节映射到求问者的处境。比如：不能只说"圣杯四那个人就是你"，要说"圣杯四里那个盘腿坐在地上、双臂交叉、低头不看云中递来的第四只杯子的人——你现在就是这样，机会在敲门但你连头都不想抬"。
+- 把牌面的视觉信息落到求问者的具体生活场景中
+
+**不要**：
+- 不要铺垫、不要鸡汤结尾、不要说"这张牌代表了…"
+- 不要逐张牌依次分析——只讲重点牌`;
+}
